@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -73,14 +72,12 @@ export default function Messages() {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Redirect if not authenticated
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       navigate('/auth');
     }
   }, [isAuthenticated, isLoading, navigate]);
   
-  // Fetch users and conversations
   useEffect(() => {
     if (userData && currentUser) {
       fetchUsers();
@@ -88,12 +85,10 @@ export default function Messages() {
     }
   }, [userData, currentUser]);
   
-  // Scroll to bottom when messages change
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
   
-  // Fetch users
   const fetchUsers = async () => {
     if (!userData) return;
     
@@ -128,7 +123,6 @@ export default function Messages() {
     }
   };
   
-  // Fetch conversations
   const fetchConversations = async () => {
     if (!currentUser) return;
     
@@ -140,7 +134,6 @@ export default function Messages() {
         orderBy('lastMessageTimestamp', 'desc')
       );
       
-      // Real-time listener for conversations
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const conversationsData: Conversation[] = [];
         
@@ -161,7 +154,6 @@ export default function Messages() {
     }
   };
   
-  // Fetch messages for a conversation
   const fetchMessages = async (conversationId: string) => {
     setIsLoadingMessages(true);
     try {
@@ -172,7 +164,6 @@ export default function Messages() {
         orderBy('timestamp', 'asc')
       );
       
-      // Real-time listener for messages
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const messagesData: Message[] = [];
         
@@ -186,7 +177,6 @@ export default function Messages() {
         setMessages(messagesData);
         setIsLoadingMessages(false);
         
-        // Mark messages as read
         markMessagesAsRead(conversationId);
         
         logEvent('Messages fetched', { count: messagesData.length, conversationId });
@@ -199,7 +189,6 @@ export default function Messages() {
     }
   };
   
-  // Mark messages as read
   const markMessagesAsRead = async (conversationId: string) => {
     if (!currentUser) return;
     
@@ -218,7 +207,6 @@ export default function Messages() {
         await updateDoc(doc.ref, { read: true });
       });
       
-      // Update conversation unread count
       const conversationRef = doc(db, 'conversations', conversationId);
       await updateDoc(conversationRef, { unreadCount: 0 });
     } catch (error) {
@@ -226,12 +214,10 @@ export default function Messages() {
     }
   };
   
-  // Select a conversation
   const selectConversation = async (conversation: Conversation) => {
     setSelectedConversation(conversation);
     setSelectedUser(null);
     
-    // Find the other participant
     if (currentUser) {
       const otherParticipantId = conversation.participants.find(id => id !== currentUser.uid);
       if (otherParticipantId) {
@@ -249,11 +235,9 @@ export default function Messages() {
     fetchMessages(conversation.id);
   };
   
-  // Start a new conversation
   const startNewConversation = async (user: User) => {
     if (!currentUser) return;
     
-    // Check if conversation already exists
     const existingConversation = conversations.find(conv => 
       conv.participants.includes(user.uid) && conv.participants.includes(currentUser.uid)
     );
@@ -264,7 +248,6 @@ export default function Messages() {
     }
     
     try {
-      // Create a new conversation
       const newConversation = {
         participants: [currentUser.uid, user.uid],
         createdAt: Timestamp.now(),
@@ -290,7 +273,6 @@ export default function Messages() {
     }
   };
   
-  // Send a message
   const sendMessage = async () => {
     if (!currentUser || !selectedConversation || !newMessage.trim()) return;
     
@@ -305,7 +287,6 @@ export default function Messages() {
       
       await addDoc(collection(db, 'messages'), message);
       
-      // Update conversation with last message
       const conversationRef = doc(db, 'conversations', selectedConversation.id);
       await updateDoc(conversationRef, {
         lastMessage: newMessage.trim(),
@@ -321,12 +302,10 @@ export default function Messages() {
     }
   };
   
-  // Scroll to bottom of messages
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
   
-  // Handle message input keypress
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -334,13 +313,11 @@ export default function Messages() {
     }
   };
   
-  // Format timestamp
   const formatMessageTime = (timestamp: Date | { seconds: number; nanoseconds: number }) => {
     const date = timestamp instanceof Date ? timestamp : new Date(timestamp.seconds * 1000);
     return format(date, 'h:mm a');
   };
   
-  // Format conversation time
   const formatConversationTime = (timestamp?: Date | { seconds: number; nanoseconds: number }) => {
     if (!timestamp) return '';
     
@@ -356,7 +333,6 @@ export default function Messages() {
     }
   };
   
-  // Get user initials
   const getUserInitials = (name?: string) => {
     if (!name) return 'U';
     return name
@@ -367,7 +343,6 @@ export default function Messages() {
       .substring(0, 2);
   };
   
-  // Filter users based on search
   const filteredUsers = users.filter(user => 
     user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.email.toLowerCase().includes(searchQuery.toLowerCase())
@@ -409,7 +384,6 @@ export default function Messages() {
         
         <Card className="flex-1 overflow-hidden border">
           <div className="grid md:grid-cols-[300px_1fr] h-[calc(100vh-200px)]">
-            {/* Conversations list */}
             <div className="border-r">
               <div className="p-3 border-b">
                 <div className="relative">
@@ -464,7 +438,6 @@ export default function Messages() {
                 
                 <Separator className="my-2" />
                 
-                {/* New conversation options */}
                 <div className="p-3">
                   <h3 className="text-sm font-medium mb-2">Start a conversation</h3>
                   {filteredUsers.length > 0 ? (
@@ -499,10 +472,8 @@ export default function Messages() {
               </ScrollArea>
             </div>
             
-            {/* Chat area */}
             {selectedConversation ? (
               <div className="flex flex-col h-full">
-                {/* Chat header */}
                 <div className="p-3 border-b flex items-center gap-3">
                   {selectedUser && (
                     <>
@@ -520,7 +491,6 @@ export default function Messages() {
                   )}
                 </div>
                 
-                {/* Messages */}
                 <ScrollArea className="flex-1 p-4">
                   {isLoadingMessages ? (
                     <div className="flex justify-center py-4">
@@ -572,7 +542,6 @@ export default function Messages() {
                   )}
                 </ScrollArea>
                 
-                {/* Message input */}
                 <div className="p-3 border-t mt-auto">
                   <div className="flex gap-2">
                     <Textarea
@@ -606,8 +575,9 @@ export default function Messages() {
               </div>
             )}
           </div>
-        </CardContent>
+        </Card>
       </main>
     </div>
   );
 }
+
