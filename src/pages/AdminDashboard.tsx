@@ -45,14 +45,15 @@ import { initializeApp } from 'firebase/app';
 
 // Firebase config for temporary auth instance
 const firebaseConfig = {
-  apiKey: "AIzaSyD-rU_E8QIb_enSJriKXdVwfS4veqcyJVk",
-  authDomain: "student-teacher-appointm-59cd5.firebaseapp.com",
-  projectId: "student-teacher-appointm-59cd5",
-  storageBucket: "student-teacher-appointm-59cd5.firebasestorage.app",
-  messagingSenderId: "1033956053587",
-  appId: "1:1033956053587:web:cb0c4b17ecf926df6b2ca6",
-  measurementId: "G-BY4PCGL2SZ"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
+
 
 export default function AdminDashboard() {
   const { isAuthenticated, isLoading, userData } = useAuth();
