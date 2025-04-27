@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 interface NavLinkProps {
   to: string;
@@ -284,6 +285,9 @@ export default function Navbar() {
                 </Button>
               </div>
             )}
+            
+            {/* Theme Toggle */}
+            <ThemeToggle />
             
             {/* Mobile menu toggle */}
             <Button 

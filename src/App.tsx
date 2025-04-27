@@ -1,9 +1,9 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { ThemeProvider } from "@/components/ui/theme-provider";
 import Layout from "@/components/Layout";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
@@ -88,12 +88,12 @@ const UserRoute = ({ children }: { children: React.ReactNode }) => {
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <AuthProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Layout>
+    <ThemeProvider defaultTheme="system">
+      <TooltipProvider>
+        <AuthProvider>
+          <Toaster />
+          <BrowserRouter>
+            <Layout>
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/auth" element={<Auth />} />
@@ -144,7 +144,7 @@ const App = () => (
                 path="/admin/profile" 
                 element={
                   <AdminRoute>
-                    <Navigate to="/admin" replace />
+                      <Navigate to="/admin" replace />
                   </AdminRoute>
                 } 
               />
@@ -175,10 +175,11 @@ const App = () => (
               />
               <Route path="*" element={<NotFound />} />
             </Routes>
-          </Layout>
-        </BrowserRouter>
-      </AuthProvider>
-    </TooltipProvider>
+            </Layout>
+          </BrowserRouter>
+        </AuthProvider>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

@@ -54,7 +54,6 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-
 export default function AdminDashboard() {
   const { isAuthenticated, isLoading, userData } = useAuth();
   const navigate = useNavigate();

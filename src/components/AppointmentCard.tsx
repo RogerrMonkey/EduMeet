@@ -173,29 +173,29 @@ export default function AppointmentCard({ appointment, onStatusChange, compact }
       <CardContent className={cn("pb-2", compact && "p-4 pt-0")}>
         {!compact ? (
           <>
-            <p className="text-sm text-muted-foreground line-clamp-2">{appointment.description}</p>
-            
-            <div className="grid grid-cols-2 gap-2 mt-4">
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-                  <UserIcon className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Student</p>
-                  <p className="text-sm font-medium">{appointment.studentName}</p>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
-                  <UserIcon className="h-4 w-4 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Teacher</p>
-                  <p className="text-sm font-medium">{appointment.teacherName}</p>
-                </div>
-              </div>
+        <p className="text-sm text-muted-foreground line-clamp-2">{appointment.description}</p>
+        
+        <div className="grid grid-cols-2 gap-2 mt-4">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+              <UserIcon className="h-4 w-4 text-muted-foreground" />
             </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Student</p>
+              <p className="text-sm font-medium">{appointment.studentName}</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+              <UserIcon className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Teacher</p>
+              <p className="text-sm font-medium">{appointment.teacherName}</p>
+            </div>
+          </div>
+        </div>
           </>
         ) : (
           <div className="flex justify-between items-center">
@@ -242,9 +242,9 @@ export default function AppointmentCard({ appointment, onStatusChange, compact }
             size="sm" 
             className="flex gap-1.5 ml-auto hover:bg-blue-50 hover:text-blue-600 transition-colors"
           >
-            <MessageSquareIcon className="h-4 w-4" />
-            Message
-          </Button>
+          <MessageSquareIcon className="h-4 w-4" />
+          Message
+        </Button>
         )}
         
         {canDelete && !compact && (
@@ -268,7 +268,7 @@ export default function AppointmentCard({ appointment, onStatusChange, compact }
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction
+                <AlertDialogAction 
                   onClick={deleteAppointment}
                   className="bg-destructive hover:bg-destructive/90"
                 >

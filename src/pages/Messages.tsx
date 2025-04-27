@@ -14,7 +14,8 @@ import {
   updateDoc,
   arrayUnion,
   increment,
-  writeBatch
+  writeBatch,
+  deleteDoc
 } from 'firebase/firestore';
 import { db, collections, logEvent } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -31,7 +32,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { ArrowLeftIcon, SearchIcon, SendIcon, XIcon, ArrowUpIcon, ArrowDownIcon } from 'lucide-react';
+import { ArrowLeftIcon, SearchIcon, SendIcon, XIcon, ArrowUpIcon, ArrowDownIcon, TrashIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface User {
@@ -673,6 +674,45 @@ export default function Messages() {
     clearMessageSearch();
   }, [selectedConversation]);
   
+  // Add this function to delete a conversation
+  const deleteConversation = async (conversationId: string) => {
+    if (!currentUser) return;
+    
+    // Confirm deletion
+    if (!window.confirm("Are you sure you want to delete this entire conversation? This action cannot be undone.")) {
+      return;
+    }
+    
+    try {
+      // Delete the conversation document
+      await deleteDoc(doc(db, 'conversations', conversationId));
+      
+      // Delete all messages in the conversation
+      const messagesRef = collection(db, 'messages');
+      const q = query(messagesRef, where('conversationId', '==', conversationId));
+      const querySnapshot = await getDocs(q);
+      
+      const batch = writeBatch(db);
+      querySnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      
+      await batch.commit();
+      
+      // Update UI
+      if (selectedConversation?.id === conversationId) {
+        setSelectedConversation(null);
+        setMessages([]);
+      }
+      
+      toast.success('Conversation deleted successfully');
+      
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      toast.error('Failed to delete conversation');
+    }
+  };
+  
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -689,7 +729,7 @@ export default function Messages() {
     <div className="min-h-screen flex flex-col">
       <Navbar />
       
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-6 flex flex-col">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 pt-20 pb-6 flex flex-col">
         <div className="flex items-center gap-4 mb-6">
           <Button 
             variant="ghost" 
@@ -707,9 +747,9 @@ export default function Messages() {
           </div>
         </div>
         
-        <Card className="flex-1 overflow-hidden border">
-          <div className="grid md:grid-cols-[300px_1fr] h-[calc(100vh-200px)]">
-            <div className="border-r">
+        <Card className="flex-1 overflow-hidden border shadow-sm">
+          <div className="grid md:grid-cols-[320px_1fr] h-[calc(100vh-220px)]">
+            <div className="border-r flex flex-col h-full">
               <div className="p-3 border-b">
                 <div className="relative">
                   <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -722,93 +762,111 @@ export default function Messages() {
                 </div>
               </div>
               
-              <ScrollArea className="h-[calc(100vh-254px)]">
-                {conversations.length > 0 && (
-                  <div className="divide-y">
-                    {conversations.map((conversation) => {
-                      const otherParticipantId = conversation.participants.find(id => id !== currentUser?.uid);
-                      const otherUser = users.find(user => user.uid === otherParticipantId);
-                      
-                      return (
-                        <div
-                          key={conversation.id}
-                          className={cn(
-                            "flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors",
-                            selectedConversation?.id === conversation.id && "bg-muted"
-                          )}
-                          onClick={() => selectConversation(conversation)}
-                        >
-                          <Avatar className="h-10 w-10">
-                            <AvatarImage src={otherUser?.photoURL || ""} />
-                            <AvatarFallback>
-                              {getUserInitials(otherUser?.displayName || "User")}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex justify-between items-start">
-                              <div className="font-medium truncate">{otherUser?.displayName || "User"}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {formatConversationTime(conversation.lastMessageTimestamp)}
+              <div className="flex-grow overflow-y-auto">
+                <div className="h-full">
+                  {conversations.length > 0 && (
+                    <div className="divide-y">
+                      {conversations.map((conversation) => {
+                        const otherParticipantId = conversation.participants.find(id => id !== currentUser?.uid);
+                        const otherUser = users.find(user => user.uid === otherParticipantId);
+                        
+                        return (
+                          <div
+                            key={conversation.id}
+                            className={cn(
+                              "flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors group",
+                              selectedConversation?.id === conversation.id && "bg-muted"
+                            )}
+                          >
+                            <div 
+                              className="flex-1 flex items-center gap-3 cursor-pointer"
+                              onClick={() => selectConversation(conversation)}
+                            >
+                              <Avatar className="h-10 w-10 flex-shrink-0">
+                                <AvatarImage src={otherUser?.photoURL || ""} />
+                                <AvatarFallback>
+                                  {getUserInitials(otherUser?.displayName || "User")}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex justify-between items-start">
+                                  <div className="font-medium truncate">{otherUser?.displayName || "User"}</div>
+                                  <div className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                                    {formatConversationTime(conversation.lastMessageTimestamp)}
+                                  </div>
+                                </div>
+                                <div className="text-sm text-muted-foreground truncate">
+                                  {conversation.lastMessage || "No messages yet"}
+                                </div>
                               </div>
+                              {conversation.unreadCount ? (
+                                <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-xs text-primary-foreground flex-shrink-0">
+                                  {conversation.unreadCount}
+                                </div>
+                              ) : null}
                             </div>
-                            <div className="text-sm text-muted-foreground truncate">
-                              {conversation.lastMessage || "No messages yet"}
-                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-0 group-hover:opacity-100 hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-900/20 flex-shrink-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteConversation(conversation.id);
+                              }}
+                              title="Delete conversation"
+                            >
+                              <TrashIcon className="h-4 w-4" />
+                            </Button>
                           </div>
-                          {conversation.unreadCount ? (
-                            <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-xs text-primary-foreground">
-                              {conversation.unreadCount}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                <Separator className="my-2" />
-                
-                <div className="p-3">
-                  <h3 className="text-sm font-medium mb-2">Start a conversation</h3>
-                  {filteredUsers.length > 0 ? (
-                    <div className="space-y-1">
-                      {filteredUsers.map((user) => (
-                        <div
-                          key={user.uid}
-                          className="flex items-center gap-3 p-2 rounded-md cursor-pointer hover:bg-muted/50 transition-colors"
-                          onClick={() => startNewConversation(user)}
-                        >
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={user.photoURL} />
-                            <AvatarFallback>{getUserInitials(user.displayName)}</AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{user.displayName}</div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {user.role}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">
-                      {searchQuery 
-                        ? "No users found matching your search" 
-                        : "No users available to message"}
+                        );
+                      })}
                     </div>
                   )}
+                  
+                  <Separator className="my-2" />
+                  
+                  <div className="p-3">
+                    <h3 className="text-sm font-medium mb-2">Start a conversation</h3>
+                    {filteredUsers.length > 0 ? (
+                      <div className="space-y-1">
+                        {filteredUsers.map((user) => (
+                          <div
+                            key={user.uid}
+                            className="flex items-center gap-3 p-2 rounded-md cursor-pointer hover:bg-muted/50 transition-colors"
+                            onClick={() => startNewConversation(user)}
+                          >
+                            <Avatar className="h-8 w-8 flex-shrink-0">
+                              <AvatarImage src={user.photoURL} />
+                              <AvatarFallback>{getUserInitials(user.displayName)}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate">{user.displayName}</div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {user.role}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">
+                        {searchQuery 
+                          ? "No users found matching your search" 
+                          : "No users available to message"}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </ScrollArea>
+              </div>
             </div>
             
             {selectedConversation ? (
               <div className="flex flex-col h-full">
-                <div className="p-3 border-b flex items-center gap-3 justify-between">
+                <div className="p-3 border-b flex items-center justify-between">
                   <div className="flex items-center gap-3">
                   {selectedUser && (
                     <>
-                      <Avatar className="h-9 w-9">
+                      <Avatar className="h-9 w-9 flex-shrink-0">
                         <AvatarImage src={selectedUser.photoURL} />
                         <AvatarFallback>{getUserInitials(selectedUser.displayName)}</AvatarFallback>
                       </Avatar>
@@ -822,9 +880,18 @@ export default function Messages() {
                   )}
                   </div>
                   
-                  {/* Add message search UI */}
                   <div className="flex items-center gap-2">
-                    <div className="relative">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/20"
+                      onClick={() => selectedConversation && deleteConversation(selectedConversation.id)}
+                      title="Delete Conversation"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </Button>
+                    
+                    <div className="relative hidden sm:block">
                       <Input
                         placeholder="Search in conversation..."
                         className="w-[220px] h-8 pl-8 text-sm"
@@ -851,7 +918,7 @@ export default function Messages() {
                     </div>
                     
                     {searchResults.length > 0 && (
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 hidden sm:flex">
                         <span className="text-xs text-muted-foreground">
                           {activeSearchIndex + 1}/{searchResults.length}
                         </span>
@@ -878,7 +945,7 @@ export default function Messages() {
                   </div>
                 </div>
                 
-                <ScrollArea className="flex-1 p-4">
+                <div className="flex-1 overflow-y-auto p-4">
                   {isLoadingMessages ? (
                     <div className="flex justify-center py-4">
                       <div className="animate-pulse text-sm">Loading messages...</div>
@@ -902,13 +969,13 @@ export default function Messages() {
                           >
                             <div
                               className={cn(
-                                "max-w-[80%] rounded-lg p-3",
+                                "max-w-[85%] rounded-lg p-3",
                                 isCurrentUser 
                                   ? "bg-primary text-primary-foreground rounded-br-none"
                                   : "bg-muted rounded-bl-none"
                               )}
                             >
-                              <div className="text-sm">{message.content}</div>
+                              <div className="text-sm whitespace-pre-wrap break-words">{message.content}</div>
                               <div
                                 className={cn(
                                   "text-xs mt-1",
@@ -931,7 +998,7 @@ export default function Messages() {
                       </div>
                     </div>
                   )}
-                </ScrollArea>
+                </div>
                 
                 <div className="p-3 border-t mt-auto">
                   <div className="flex gap-2">
@@ -945,7 +1012,7 @@ export default function Messages() {
                     <Button 
                       className="h-auto"
                       onClick={handleSendMessage}
-                      disabled={!newMessage.trim()}
+                      disabled={!newMessage.trim() || sendingMessage}
                     >
                       <SendIcon className="h-4 w-4" />
                     </Button>
