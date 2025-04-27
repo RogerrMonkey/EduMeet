@@ -1,24 +1,72 @@
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-# Editor directories and files
-.vscode/*
+# Dependency directories
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+build/
+.out/
+.vercel/
+.next/
+.temp/
+
+# Local env files
+.env
+.env.local
+.env.*.local
+
+# Firebase related
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.firebase/
+firebase-export-*
+storage-export-*
+firestore.indexes.json
+firestore.rules
+storage.rules
+
+# Vite cache
+.vite/
+
+# IDEs and editors
+.vscode/
 !.vscode/extensions.json
-.idea
-.DS_Store
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+.DS_Store
+Thumbs.db
+
+# MacOS system files
+*.DS_Store
+
+# Other system files
+*.log
+*.tmp
+*.temp
+*.bak
+
+# Miscellaneous
+coverage/
+*.tgz
+.parcel-cache/
+*.eslintcache
+node_repl_history

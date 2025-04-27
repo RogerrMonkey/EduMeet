@@ -1,10 +1,8 @@
-
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
-import { ArrowRightIcon, CalendarIcon, CheckIcon, MessageSquareIcon, UsersIcon } from 'lucide-react';
+import { ArrowRightIcon, CalendarIcon, MessageSquareIcon, UsersIcon } from 'lucide-react';
 
 interface Feature {
   icon: React.ReactNode;
@@ -97,9 +95,9 @@ export default function Hero() {
               
               <div className="flex items-center gap-4 pt-6">
                 <div className="flex -space-x-2">
-                  {[...Array(4)].map((_, i) => (
+                  {['S', 'T', 'A', '+'].map((letter, i) => (
                     <div key={i} className="w-10 h-10 rounded-full bg-muted flex items-center justify-center border-2 border-background">
-                      <span className="text-xs font-medium">{['S', 'T', 'A', '+'][i]}</span>
+                      <span className="text-xs font-medium">{letter}</span>
                     </div>
                   ))}
                 </div>
@@ -122,22 +120,21 @@ export default function Hero() {
                 </div>
                 
                 <div className="p-6 space-y-4">
-                  {[...Array(3)].map((_, i) => (
+                  {[
+                    { title: 'Physics Consultation', time: 'Tomorrow, 2:00 PM', status: 'Confirmed', statusClass: 'bg-green-100 text-green-800' },
+                    { title: 'Math Homework Review', time: 'Friday, 10:30 AM', status: 'Pending', statusClass: 'bg-blue-100 text-blue-800' },
+                    { title: 'Project Discussion', time: 'Next week, 3:15 PM', status: 'Scheduled', statusClass: 'bg-amber-100 text-amber-800' }
+                  ].map((appointment, i) => (
                     <div key={i} className="flex gap-4 p-3 rounded-lg border bg-background/50 hover:bg-background transition-colors">
                       <div className="w-12 h-12 flex-shrink-0 rounded-md bg-primary/10 flex items-center justify-center">
                         <CalendarIcon className="h-6 w-6 text-primary" />
                       </div>
                       <div className="flex-1">
-                        <div className="font-medium">{['Physics Consultation', 'Math Homework Review', 'Project Discussion'][i]}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {['Tomorrow, 2:00 PM', 'Friday, 10:30 AM', 'Next week, 3:15 PM'][i]}
-                        </div>
+                        <div className="font-medium">{appointment.title}</div>
+                        <div className="text-sm text-muted-foreground">{appointment.time}</div>
                       </div>
-                      <div className={cn(
-                        "px-2 py-1 text-xs font-medium rounded-full",
-                        ['bg-green-100 text-green-800', 'bg-blue-100 text-blue-800', 'bg-amber-100 text-amber-800'][i]
-                      )}>
-                        {['Confirmed', 'Pending', 'Scheduled'][i]}
+                      <div className={cn("px-2 py-1 text-xs font-medium rounded-full", appointment.statusClass)}>
+                        {appointment.status}
                       </div>
                     </div>
                   ))}
@@ -191,8 +188,8 @@ export default function Hero() {
                 </Link>
               </Button>
               <Button asChild variant="outline" size="lg">
-                <Link to="/">
-                  Learn More
+                <Link to="/admin/login">
+                  Admin Portal
                 </Link>
               </Button>
             </div>

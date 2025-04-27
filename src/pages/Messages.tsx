@@ -12,7 +12,9 @@ import {
   doc,
   getDoc,
   updateDoc,
-  arrayUnion
+  arrayUnion,
+  increment,
+  writeBatch
 } from 'firebase/firestore';
 import { db, collections, logEvent } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -29,7 +31,7 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { ArrowLeftIcon, SearchIcon, SendIcon } from 'lucide-react';
+import { ArrowLeftIcon, SearchIcon, SendIcon, XIcon, ArrowUpIcon, ArrowDownIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface User {
@@ -40,12 +42,26 @@ interface User {
   role: string;
 }
 
-interface Message {
-  id: string;
+interface FirestoreUser {
+  displayName: string;
+  email: string;
+  photoURL?: string;
+  role: string;
+}
+
+interface FirestoreConversation {
+  participants: string[];
+  lastMessage?: string;
+  lastMessageTimestamp?: { seconds: number; nanoseconds: number };
+  unreadCount?: number;
+  createdAt?: { seconds: number; nanoseconds: number };
+}
+
+interface FirestoreMessage {
   conversationId: string;
   senderId: string;
   content: string;
-  timestamp: Date | { seconds: number; nanoseconds: number };
+  timestamp: { seconds: number; nanoseconds: number };
   read: boolean;
 }
 
@@ -53,8 +69,17 @@ interface Conversation {
   id: string;
   participants: string[];
   lastMessage?: string;
-  lastMessageTimestamp?: Date | { seconds: number; nanoseconds: number };
+  lastMessageTimestamp?: { seconds: number; nanoseconds: number };
   unreadCount?: number;
+}
+
+interface Message {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  timestamp: { seconds: number; nanoseconds: number };
+  read: boolean;
 }
 
 export default function Messages() {
@@ -68,9 +93,19 @@ export default function Messages() {
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messagesUnsubscribe, setMessagesUnsubscribe] = useState<(() => void) | null>(null);
+  const [totalUnreadCount, setTotalUnreadCount] = useState(0);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Add these state variables for message search
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
+  const [isSearchingMessages, setIsSearchingMessages] = useState(false);
+  const [searchResults, setSearchResults] = useState<Message[]>([]);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -82,6 +117,15 @@ export default function Messages() {
     if (userData && currentUser) {
       fetchUsers();
       fetchConversations();
+      
+      // Log index creation instructions to console for developer reference
+      console.info(
+        "If you see a Firestore index error, create the required composite index by visiting:\n" +
+        "https://console.firebase.google.com/project/_/firestore/indexes\n" +
+        "You need a composite index on the 'conversations' collection with:\n" +
+        "1. participants (array-contains)\n" +
+        "2. lastMessageTimestamp (descending)\n"
+      );
     }
   }, [userData, currentUser]);
   
@@ -89,37 +133,106 @@ export default function Messages() {
     scrollToBottom();
   }, [messages]);
   
+  useEffect(() => {
+    if (conversations.length > 0) {
+      const total = conversations.reduce((count, conversation) => {
+        return count + (conversation.unreadCount || 0);
+      }, 0);
+      setTotalUnreadCount(total);
+      
+      if (total > 0) {
+        document.title = `(${total}) Messages - EduMeet`;
+      } else {
+        document.title = 'Messages - EduMeet';
+      }
+    }
+    
+    return () => {
+      document.title = 'EduMeet';
+    };
+  }, [conversations]);
+  
   const fetchUsers = async () => {
     if (!userData) return;
     
     try {
-      const usersRef = collection(db, collections.users);
-      let q;
+      let usersData: User[] = [];
       
       if (userData.role === 'student') {
-        q = query(usersRef, where('role', '==', 'teacher'));
+        // Fetch teachers for student users
+        const teachersRef = collection(db, collections.teachers);
+        const teachersSnapshot = await getDocs(teachersRef);
+        
+        teachersSnapshot.forEach((doc) => {
+          if (doc.id !== currentUser?.uid) {
+            const teacherData = doc.data() as FirestoreUser;
+            usersData.push({
+              uid: doc.id,
+              displayName: teacherData.displayName || '',
+              email: teacherData.email || '',
+              photoURL: teacherData.photoURL,
+              role: 'teacher'
+            });
+          }
+        });
       } else if (userData.role === 'teacher') {
-        q = query(usersRef, where('role', '==', 'student'));
-      } else {
-        q = query(usersRef);
-      }
-      
-      const querySnapshot = await getDocs(q);
-      const usersData: User[] = [];
-      
-      querySnapshot.forEach((doc) => {
+        // Fetch students for teacher users
+        const studentsRef = collection(db, collections.students);
+        const q = query(studentsRef, where('status', '==', 'approved'));
+        const studentsSnapshot = await getDocs(q);
+        
+        studentsSnapshot.forEach((doc) => {
+          if (doc.id !== currentUser?.uid) {
+            const studentData = doc.data() as FirestoreUser;
+            usersData.push({
+              uid: doc.id,
+              displayName: studentData.displayName || '',
+              email: studentData.email || '',
+              photoURL: studentData.photoURL,
+              role: 'student'
+            });
+          }
+        });
+      } else if (userData.role === 'admin') {
+        // For admin, fetch both teachers and students
+        const teachersRef = collection(db, collections.teachers);
+        const teachersSnapshot = await getDocs(teachersRef);
+        
+        teachersSnapshot.forEach((doc) => {
         if (doc.id !== currentUser?.uid) {
+            const teacherData = doc.data() as FirestoreUser;
           usersData.push({
             uid: doc.id,
-            ...doc.data(),
-          } as User);
+              displayName: teacherData.displayName || '',
+              email: teacherData.email || '',
+              photoURL: teacherData.photoURL,
+              role: 'teacher'
+          });
         }
       });
+        
+        const studentsRef = collection(db, collections.students);
+        const studentsSnapshot = await getDocs(studentsRef);
+        
+        studentsSnapshot.forEach((doc) => {
+          if (doc.id !== currentUser?.uid) {
+            const studentData = doc.data() as FirestoreUser;
+            usersData.push({
+              uid: doc.id,
+              displayName: studentData.displayName || '',
+              email: studentData.email || '',
+              photoURL: studentData.photoURL,
+              role: 'student'
+            });
+          }
+        });
+      }
       
       setUsers(usersData);
       logEvent('Users fetched', { count: usersData.length });
     } catch (error) {
       console.error('Error fetching users:', error);
+      toast.error('Failed to load users');
     }
   };
   
@@ -136,27 +249,47 @@ export default function Messages() {
       
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const conversationsData: Conversation[] = [];
+        let totalUnread = 0;
         
         querySnapshot.forEach((doc) => {
+          const data = doc.data() as FirestoreConversation;
+          
+          const unreadCount = data.unreadCount || 0;
+          
           conversationsData.push({
             id: doc.id,
-            ...doc.data(),
-          } as Conversation);
+            participants: data.participants,
+            lastMessage: data.lastMessage,
+            lastMessageTimestamp: data.lastMessageTimestamp,
+            unreadCount: unreadCount
+          });
+          
+          totalUnread += unreadCount;
         });
         
         setConversations(conversationsData);
-        logEvent('Conversations fetched', { count: conversationsData.length });
+        setTotalUnreadCount(totalUnread);
+        logEvent('Conversations fetched', { count: conversationsData.length, unread: totalUnread });
       });
       
       return () => unsubscribe();
     } catch (error) {
       console.error('Error fetching conversations:', error);
+      toast.error('Failed to load conversations');
     }
   };
   
   const fetchMessages = async (conversationId: string) => {
-    setIsLoadingMessages(true);
     try {
+    setIsLoadingMessages(true);
+      setMessages([]);
+      
+      // Clean up previous listener if exists
+      if (messagesUnsubscribe) {
+        messagesUnsubscribe();
+        setMessagesUnsubscribe(null);
+      }
+      
       const messagesRef = collection(db, 'messages');
       const q = query(
         messagesRef,
@@ -164,27 +297,41 @@ export default function Messages() {
         orderBy('timestamp', 'asc')
       );
       
+      // Set up real-time listener for messages
       const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const messagesData: Message[] = [];
+        const fetchedMessages: Message[] = [];
         
         querySnapshot.forEach((doc) => {
-          messagesData.push({
+          const data = doc.data();
+          // Make sure we have a valid message structure
+          if (data.conversationId && data.senderId && data.content) {
+            fetchedMessages.push({
             id: doc.id,
-            ...doc.data(),
-          } as Message);
+            conversationId: data.conversationId,
+            senderId: data.senderId,
+            content: data.content,
+              timestamp: data.timestamp || Timestamp.now(),
+              read: !!data.read
+          });
+          }
         });
         
-        setMessages(messagesData);
+        setMessages(fetchedMessages);
         setIsLoadingMessages(false);
         
-        markMessagesAsRead(conversationId);
-        
-        logEvent('Messages fetched', { count: messagesData.length, conversationId });
+        // Scroll to bottom when messages are loaded
+        scrollToBottom();
       });
       
-      return () => unsubscribe();
+      // Store unsubscribe function
+      setMessagesUnsubscribe(() => unsubscribe);
+      
+      // Mark messages as read in Firestore
+      await markMessagesAsRead(conversationId);
+        
     } catch (error) {
       console.error('Error fetching messages:', error);
+      toast.error('Failed to load messages');
       setIsLoadingMessages(false);
     }
   };
@@ -193,6 +340,7 @@ export default function Messages() {
     if (!currentUser) return;
     
     try {
+      // Find unread messages in this conversation that were not sent by the current user
       const messagesRef = collection(db, 'messages');
       const q = query(
         messagesRef,
@@ -203,36 +351,87 @@ export default function Messages() {
       
       const querySnapshot = await getDocs(q);
       
-      querySnapshot.forEach(async (doc) => {
-        await updateDoc(doc.ref, { read: true });
+      // Mark each message as read
+      const batch = writeBatch(db);
+      querySnapshot.forEach((doc) => {
+        batch.update(doc.ref, { read: true });
       });
       
+      if (querySnapshot.size > 0) {
+        await batch.commit();
+      }
+      
+      // Reset unread counter for current user's view of this conversation
       const conversationRef = doc(db, 'conversations', conversationId);
-      await updateDoc(conversationRef, { unreadCount: 0 });
+      await updateDoc(conversationRef, { 
+        unreadCount: 0,
+        [`unreadCount_${currentUser.uid}`]: 0,
+        lastRead: Timestamp.now() 
+      });
     } catch (error) {
       console.error('Error marking messages as read:', error);
     }
   };
   
   const selectConversation = async (conversation: Conversation) => {
+    try {
     setSelectedConversation(conversation);
-    setSelectedUser(null);
+      setMessages([]);
+      setIsLoadingMessages(true);
     
-    if (currentUser) {
-      const otherParticipantId = conversation.participants.find(id => id !== currentUser.uid);
-      if (otherParticipantId) {
-        const userDoc = await getDoc(doc(db, collections.users, otherParticipantId));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as User;
+      // Get the other participant's ID
+      const otherParticipantId = conversation.participants.find(
+        (participantId) => participantId !== currentUser?.uid
+      );
+
+      if (!otherParticipantId) {
+        console.error('Could not find other participant ID');
+        setIsLoadingMessages(false);
+        return;
+      }
+
+      // Try to find the user in teachers collection first
+      let userRole = 'teacher';
+      const teacherDoc = await getDoc(doc(db, 'teachers', otherParticipantId));
+      
+      if (teacherDoc.exists()) {
+        // User is a teacher
+        setSelectedUser({
+          uid: otherParticipantId,
+          ...teacherDoc.data() as FirestoreUser,
+          role: 'teacher'
+        });
+      } else {
+        // Try students collection
+        userRole = 'student';
+        const studentDoc = await getDoc(doc(db, 'students', otherParticipantId));
+        
+        if (studentDoc.exists()) {
           setSelectedUser({
             uid: otherParticipantId,
-            ...userData
+            ...studentDoc.data() as FirestoreUser,
+            role: 'student'
           });
+        } else {
+          console.error(`User ${otherParticipantId} not found in teachers or students collections`);
         }
       }
+      
+      // Mark the conversation as read
+      await updateDoc(doc(db, 'conversations', conversation.id), {
+        unreadCount: 0,
+        lastRead: Timestamp.now()
+      });
+      
+      // Fetch messages for this conversation
+      await fetchMessages(conversation.id);
+      
+    } catch (error) {
+      console.error('Error selecting conversation:', error);
+      toast.error('Failed to load conversation details');
+    } finally {
+      setIsLoadingMessages(false);
     }
-    
-    fetchMessages(conversation.id);
   };
   
   const startNewConversation = async (user: User) => {
@@ -273,11 +472,18 @@ export default function Messages() {
     }
   };
   
-  const sendMessage = async () => {
-    if (!currentUser || !selectedConversation || !newMessage.trim()) return;
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!newMessage.trim() || !selectedConversation || !currentUser) {
+      return;
+    }
     
     try {
-      const message = {
+      setSendingMessage(true);
+      
+      // Create a properly formatted message object
+      const messageData = {
         conversationId: selectedConversation.id,
         senderId: currentUser.uid,
         content: newMessage.trim(),
@@ -285,20 +491,35 @@ export default function Messages() {
         read: false
       };
       
-      await addDoc(collection(db, 'messages'), message);
+      // Add the message to Firestore
+      await addDoc(collection(db, 'messages'), messageData);
       
-      const conversationRef = doc(db, 'conversations', selectedConversation.id);
-      await updateDoc(conversationRef, {
+      // Get other participant from conversation
+      const otherParticipantId = selectedConversation.participants.find(
+        id => id !== currentUser.uid
+      );
+      
+      // Update the conversation with the last message
+      await updateDoc(doc(db, 'conversations', selectedConversation.id), {
         lastMessage: newMessage.trim(),
         lastMessageTimestamp: Timestamp.now(),
-        unreadCount: arrayUnion(1)
+        lastMessageSenderId: currentUser.uid,
+        // Only increment unread count for the other participant's view
+        ...(otherParticipantId ? { [`unreadCount_${otherParticipantId}`]: increment(1) } : {}),
+        unreadCount: increment(1)
       });
       
+      // Clear the input
       setNewMessage('');
-      logEvent('Message sent', { conversationId: selectedConversation.id });
+      
+      // Scroll to bottom
+      scrollToBottom();
+      
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Failed to send message');
+    } finally {
+      setSendingMessage(false);
     }
   };
   
@@ -309,19 +530,47 @@ export default function Messages() {
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      handleSendMessage(e);
     }
   };
   
-  const formatMessageTime = (timestamp: Date | { seconds: number; nanoseconds: number }) => {
-    const date = timestamp instanceof Date ? timestamp : new Date(timestamp.seconds * 1000);
+  const formatMessageTime = (timestamp: { seconds: number; nanoseconds: number }) => {
+    try {
+      // Make sure timestamp is valid
+      if (!timestamp || typeof timestamp.seconds !== 'number') {
+        return '';
+      }
+      
+      const date = new Date(timestamp.seconds * 1000);
+      
+      // Verify the date is valid
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      
     return format(date, 'h:mm a');
+    } catch (error) {
+      console.error('Error formatting message time:', error);
+      return '';
+    }
   };
   
-  const formatConversationTime = (timestamp?: Date | { seconds: number; nanoseconds: number }) => {
+  const formatConversationTime = (timestamp?: { seconds: number; nanoseconds: number }) => {
     if (!timestamp) return '';
     
-    const date = timestamp instanceof Date ? timestamp : new Date(timestamp.seconds * 1000);
+    try {
+      // Make sure timestamp is valid
+      if (typeof timestamp.seconds !== 'number') {
+        return '';
+      }
+      
+      const date = new Date(timestamp.seconds * 1000);
+      
+      // Verify the date is valid before proceeding
+      if (isNaN(date.getTime())) {
+        return '';
+      }
+      
     const now = new Date();
     
     if (date.toDateString() === now.toDateString()) {
@@ -330,6 +579,10 @@ export default function Messages() {
       return format(date, 'MMM d');
     } else {
       return format(date, 'MM/dd/yy');
+      }
+    } catch (error) {
+      console.error('Error formatting timestamp:', error);
+      return '';
     }
   };
   
@@ -347,6 +600,78 @@ export default function Messages() {
     user.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  
+  // Add this function to search through messages
+  const searchMessages = () => {
+    if (!messageSearchQuery.trim() || messages.length === 0) {
+      setSearchResults([]);
+      return;
+    }
+    
+    setIsSearchingMessages(true);
+    const query = messageSearchQuery.toLowerCase();
+    const results = messages.filter(message => 
+      message.content.toLowerCase().includes(query)
+    );
+    
+    setSearchResults(results);
+    setActiveSearchIndex(results.length > 0 ? 0 : -1);
+    setIsSearchingMessages(false);
+    
+    // Scroll to first result
+    if (results.length > 0) {
+      const msgElement = document.getElementById(`message-${results[0].id}`);
+      if (msgElement) {
+        msgElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        msgElement.classList.add('bg-yellow-100/30');
+      }
+    }
+  };
+
+  // Add this function to navigate between search results
+  const navigateSearchResults = (direction: 'next' | 'prev') => {
+    if (searchResults.length === 0) return;
+    
+    let newIndex = activeSearchIndex;
+    if (direction === 'next') {
+      newIndex = (activeSearchIndex + 1) % searchResults.length;
+    } else {
+      newIndex = (activeSearchIndex - 1 + searchResults.length) % searchResults.length;
+    }
+    
+    setActiveSearchIndex(newIndex);
+    
+    // Highlight and scroll to the active result
+    const msgElement = document.getElementById(`message-${searchResults[newIndex].id}`);
+    if (msgElement) {
+      msgElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Remove highlight from all messages
+      document.querySelectorAll('.message-highlight').forEach(el => {
+        el.classList.remove('bg-yellow-100/30');
+      });
+      
+      // Add highlight to current message
+      msgElement.classList.add('bg-yellow-100/30');
+    }
+  };
+
+  // Add this function to clear message search
+  const clearMessageSearch = () => {
+    setMessageSearchQuery('');
+    setSearchResults([]);
+    setActiveSearchIndex(-1);
+    
+    // Remove all highlights
+    document.querySelectorAll('.message-highlight').forEach(el => {
+      el.classList.remove('bg-yellow-100/30');
+    });
+  };
+
+  // Add this effect to reset search when conversation changes
+  useEffect(() => {
+    clearMessageSearch();
+  }, [selectedConversation]);
   
   if (isLoading) {
     return (
@@ -400,39 +725,44 @@ export default function Messages() {
               <ScrollArea className="h-[calc(100vh-254px)]">
                 {conversations.length > 0 && (
                   <div className="divide-y">
-                    {conversations.map((conversation) => (
-                      <div
-                        key={conversation.id}
-                        className={cn(
-                          "flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors",
-                          selectedConversation?.id === conversation.id && "bg-muted"
-                        )}
-                        onClick={() => selectConversation(conversation)}
-                      >
-                        <Avatar className="h-10 w-10">
-                          <AvatarImage src="" />
-                          <AvatarFallback>
-                            {getUserInitials("User")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between items-start">
-                            <div className="font-medium truncate">User</div>
-                            <div className="text-xs text-muted-foreground">
-                              {formatConversationTime(conversation.lastMessageTimestamp)}
+                    {conversations.map((conversation) => {
+                      const otherParticipantId = conversation.participants.find(id => id !== currentUser?.uid);
+                      const otherUser = users.find(user => user.uid === otherParticipantId);
+                      
+                      return (
+                        <div
+                          key={conversation.id}
+                          className={cn(
+                            "flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/50 transition-colors",
+                            selectedConversation?.id === conversation.id && "bg-muted"
+                          )}
+                          onClick={() => selectConversation(conversation)}
+                        >
+                          <Avatar className="h-10 w-10">
+                            <AvatarImage src={otherUser?.photoURL || ""} />
+                            <AvatarFallback>
+                              {getUserInitials(otherUser?.displayName || "User")}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start">
+                              <div className="font-medium truncate">{otherUser?.displayName || "User"}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {formatConversationTime(conversation.lastMessageTimestamp)}
+                              </div>
+                            </div>
+                            <div className="text-sm text-muted-foreground truncate">
+                              {conversation.lastMessage || "No messages yet"}
                             </div>
                           </div>
-                          <div className="text-sm text-muted-foreground truncate">
-                            {conversation.lastMessage || "No messages yet"}
-                          </div>
+                          {conversation.unreadCount ? (
+                            <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-xs text-primary-foreground">
+                              {conversation.unreadCount}
+                            </div>
+                          ) : null}
                         </div>
-                        {conversation.unreadCount ? (
-                          <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-xs text-primary-foreground">
-                            {conversation.unreadCount}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
                 
@@ -474,7 +804,8 @@ export default function Messages() {
             
             {selectedConversation ? (
               <div className="flex flex-col h-full">
-                <div className="p-3 border-b flex items-center gap-3">
+                <div className="p-3 border-b flex items-center gap-3 justify-between">
+                  <div className="flex items-center gap-3">
                   {selectedUser && (
                     <>
                       <Avatar className="h-9 w-9">
@@ -489,6 +820,62 @@ export default function Messages() {
                       </div>
                     </>
                   )}
+                  </div>
+                  
+                  {/* Add message search UI */}
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Input
+                        placeholder="Search in conversation..."
+                        className="w-[220px] h-8 pl-8 text-sm"
+                        value={messageSearchQuery}
+                        onChange={(e) => setMessageSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            searchMessages();
+                          }
+                        }}
+                      />
+                      <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      {messageSearchQuery && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
+                          onClick={clearMessageSearch}
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                    
+                    {searchResults.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-muted-foreground">
+                          {activeSearchIndex + 1}/{searchResults.length}
+                        </span>
+                        <div className="flex">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => navigateSearchResults('prev')}
+                          >
+                            <ArrowUpIcon className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => navigateSearchResults('next')}
+                          >
+                            <ArrowDownIcon className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
                 <ScrollArea className="flex-1 p-4">
@@ -500,13 +887,17 @@ export default function Messages() {
                     <div className="space-y-4">
                       {messages.map((message) => {
                         const isCurrentUser = message.senderId === currentUser?.uid;
+                        const isSearchResult = searchResults.some(result => result.id === message.id);
+                        const isActiveResult = searchResults[activeSearchIndex]?.id === message.id;
                         
                         return (
                           <div
+                            id={`message-${message.id}`}
                             key={message.id}
                             className={cn(
-                              "flex",
-                              isCurrentUser ? "justify-end" : "justify-start"
+                              "flex message-highlight",
+                              isCurrentUser ? "justify-end" : "justify-start",
+                              isActiveResult && "bg-yellow-100/30"
                             )}
                           >
                             <div
@@ -553,7 +944,7 @@ export default function Messages() {
                     />
                     <Button 
                       className="h-auto"
-                      onClick={sendMessage}
+                      onClick={handleSendMessage}
                       disabled={!newMessage.trim()}
                     >
                       <SendIcon className="h-4 w-4" />

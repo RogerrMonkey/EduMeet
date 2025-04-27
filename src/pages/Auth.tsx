@@ -1,74 +1,109 @@
-
 import { useState, useEffect } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
-  Card, 
-  CardContent, 
-  CardDescription, 
-  CardFooter, 
-  CardHeader, 
-  CardTitle 
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
 } from '@/components/ui/card';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeftIcon, Loader2Icon, LogInIcon, UserPlusIcon } from 'lucide-react';
-import { logEvent, userRoles } from '@/lib/firebase';
+import { userRoles } from '@/lib/firebase';
+import Navbar from '@/components/Navbar';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertCircleIcon } from 'lucide-react';
+
+interface FormErrors {
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  displayName?: string;
+  phoneNumber?: string;
+}
 
 export default function Auth() {
-  const { login, register, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-
-  // Get the mode from URL (login or register)
-  const searchParams = new URLSearchParams(location.search);
-  const initialMode = searchParams.get('mode') === 'register' ? 'register' : 'login';
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+  const { login, register, logout, isAuthenticated, userData, isLoading } = useAuth();
   
-  // Form state
+  // Get mode from URL query parameters
+  const getInitialMode = () => {
+    const params = new URLSearchParams(location.search);
+    return params.get('mode') === 'register' ? 'register' : 'login';
+  };
+  
+  // Check if session expired flag is set
+  const isSessionExpired = () => {
+    const params = new URLSearchParams(location.search);
+    return params.get('sessionExpired') === 'true';
+  };
+  
+  // Form states
+  const [mode, setMode] = useState<'login' | 'register'>(getInitialMode);
+  const [sessionExpired, setSessionExpired] = useState(isSessionExpired());
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [role, setRole] = useState<'student' | 'teacher'>('student');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [formLoading, setFormLoading] = useState(false);
+  const [errors, setErrors] = useState<FormErrors>({});
   
-  // Redirect if already authenticated
+  // Update when URL changes
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/dashboard');
+    setMode(getInitialMode());
+    setSessionExpired(isSessionExpired());
+  }, [location.search]);
+
+  // Redirect authenticated users to appropriate dashboard
+  useEffect(() => {
+    if (isAuthenticated && !isLoading && userData) {
+      if (userData.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, isLoading, userData, navigate]);
+  
+  // Show toast notification for expired session
+  useEffect(() => {
+    if (sessionExpired) {
+      toast.error('Your session has expired. Please sign in again.');
+    }
+  }, [sessionExpired]);
   
   // Update URL when mode changes
-  useEffect(() => {
-    const newParams = new URLSearchParams();
-    newParams.set('mode', mode);
-    navigate({ search: newParams.toString() }, { replace: true });
-  }, [mode, navigate]);
+  const handleModeChange = (newMode: 'login' | 'register') => {
+    setMode(newMode);
+    navigate(`/auth?mode=${newMode}`, { replace: true });
+  };
   
-  // Validate form
+  // Validation
   const validateForm = () => {
-    const newErrors: Record<string, string> = {};
+    const newErrors: FormErrors = {};
     
     if (!email) newErrors.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Email is invalid';
+    else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Invalid email format';
     
     if (!password) newErrors.password = 'Password is required';
     else if (password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     
     if (mode === 'register') {
-      if (!displayName) newErrors.displayName = 'Name is required';
-      if (!role) newErrors.role = 'Role is required';
+      if (!displayName) newErrors.displayName = 'Full name is required';
+      if (!phoneNumber) newErrors.phoneNumber = 'Phone number is required';
+      else if (!/^\+?[\d\s-]{10,}$/.test(phoneNumber)) {
+        newErrors.phoneNumber = 'Invalid phone number format';
+      }
+      if (!confirmPassword) newErrors.confirmPassword = 'Please confirm your password';
+      else if (password !== confirmPassword) {
+        newErrors.confirmPassword = 'Passwords do not match';
+      }
     }
     
     setErrors(newErrors);
@@ -81,73 +116,98 @@ export default function Auth() {
     
     if (!validateForm()) return;
     
-    setIsSubmitting(true);
+    setFormLoading(true);
     try {
       if (mode === 'login') {
-        await login(email, password);
-        logEvent('User logged in', { email });
-        toast.success('Successfully logged in');
+        const userData = await login(email, password);
+        
+        // If a teacher tries to login through the student page, redirect them to teacher login
+        if (userData.role === userRoles.TEACHER) {
+          toast.info('Please use the teacher login page');
+          await logout();
+          navigate('/teacher/login');
+          return;
+        }
+        
+        if (userData.role === userRoles.ADMIN) {
+          toast.error('Admin login is not allowed here');
+          await logout();
+          navigate('/admin/login');
+          return;
+        }
+        
+        // Handle regular user login
+        if (userData.status === 'approved') {
+          navigate('/dashboard');
+        } else {
+          // Logout user if not approved
+          toast.error('Your account is pending approval from admin');
+          await logout();
+        }
       } else {
-        await register(email, password, role, displayName);
-        logEvent('User registered', { email, role });
-        toast.success('Account created successfully');
+        // Register as student
+        const userData = await register(email, password, 'student', displayName, phoneNumber);
+        
+        // If student registration is pending approval, inform the user and sign them out
+        if (userData.status === 'pending') {
+          toast.success('Registration submitted! Please wait for admin approval.');
+          await logout();
+          setMode('login');
+        } else {
+          toast.success('Registration successful!');
+          navigate('/dashboard');
+        }
       }
-      navigate('/dashboard');
     } catch (error: any) {
       console.error('Authentication error:', error);
-      logEvent('Authentication error', { error: error.message, mode });
-      
-      let errorMessage = 'Authentication failed';
-      
-      // Parse Firebase error messages
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        errorMessage = 'Invalid email or password';
-      } else if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'Email is already in use';
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-      
-      toast.error(errorMessage);
+      toast.error(error.message || 'Authentication failed');
     } finally {
-      setIsSubmitting(false);
+      setFormLoading(false);
     }
   };
-  
-  // Toggle between login and register
-  const toggleMode = () => {
-    setMode(mode === 'login' ? 'register' : 'login');
-    setErrors({});
-  };
+
+  // If loading, show loading indicator
+  if (isLoading) {
+    return (
+      <div className="min-h-screen">
+        <Navbar />
+        <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
+          <div className="animate-pulse text-lg font-medium">Loading...</div>
+        </div>
+      </div>
+    );
+  }
   
   return (
     <div className="min-h-screen flex flex-col">
-      <div className="absolute top-6 left-6">
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/" className="flex items-center gap-1">
-            <ArrowLeftIcon className="h-4 w-4" />
-            Back to Home
-          </Link>
-        </Button>
-      </div>
-      
-      <div className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-md animate-scale-in">
-          <Card className="border shadow-lg">
-            <CardHeader className="space-y-1">
-              <CardTitle className="text-2xl font-bold">
-                {mode === 'login' ? 'Sign in' : 'Create an account'}
-              </CardTitle>
-              <CardDescription>
-                {mode === 'login' 
-                  ? 'Enter your credentials to access your account' 
-                  : 'Fill in the details to create your new account'}
-              </CardDescription>
-            </CardHeader>
+      <Navbar />
+      <div className="flex-1 flex items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-lg">
+          <CardHeader className="space-y-1 text-center">
+            <CardTitle className="text-2xl">
+              {mode === 'login' ? 'Student Login' : 'Student Registration'}
+            </CardTitle>
+            <CardDescription>
+              {mode === 'login' 
+                ? 'Enter your credentials to access your student dashboard'
+                : 'Create a new student account to book appointments with teachers'}
+            </CardDescription>
             
-            <form onSubmit={handleSubmit}>
-              <CardContent className="space-y-4">
-                {mode === 'register' && (
+            {sessionExpired && mode === 'login' && (
+              <Alert variant="destructive" className="mt-4">
+                <AlertCircleIcon className="h-4 w-4" />
+                <AlertTitle>Session expired</AlertTitle>
+                <AlertDescription>
+                  Your session has expired. Please sign in again to continue.
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardHeader>
+          
+          <form onSubmit={handleSubmit}>
+            <CardContent className="space-y-4">
+              {mode === 'register' && (
+                <>
                   <div className="space-y-2">
                     <Label htmlFor="displayName">Full Name</Label>
                     <Input
@@ -155,119 +215,118 @@ export default function Auth() {
                       placeholder="Enter your full name"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      error={!!errors.displayName}
+                      aria-invalid={!!errors.displayName}
                     />
                     {errors.displayName && (
                       <p className="text-sm text-destructive">{errors.displayName}</p>
                     )}
                   </div>
-                )}
-                
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="Enter your email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    error={!!errors.email}
-                  />
-                  {errors.email && (
-                    <p className="text-sm text-destructive">{errors.email}</p>
-                  )}
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    error={!!errors.password}
-                  />
-                  {errors.password && (
-                    <p className="text-sm text-destructive">{errors.password}</p>
-                  )}
-                </div>
-                
-                {mode === 'register' && (
+                  
                   <div className="space-y-2">
-                    <Label htmlFor="role">I am a</Label>
-                    <Select
-                      value={role}
-                      onValueChange={(value: 'student' | 'teacher') => setRole(value)}
-                    >
-                      <SelectTrigger id="role">
-                        <SelectValue placeholder="Select your role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="student">Student</SelectItem>
-                        <SelectItem value="teacher">Teacher</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {errors.role && (
-                      <p className="text-sm text-destructive">{errors.role}</p>
+                    <Label htmlFor="phoneNumber">Phone Number</Label>
+                    <Input
+                      id="phoneNumber"
+                      placeholder="Enter your phone number"
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      aria-invalid={!!errors.phoneNumber}
+                    />
+                    {errors.phoneNumber && (
+                      <p className="text-sm text-destructive">{errors.phoneNumber}</p>
                     )}
                   </div>
-                )}
-                
-                {mode === 'login' && (
-                  <div className="text-sm text-right">
-                    <Link 
-                      to="/forgot-password" 
-                      className="text-primary hover:underline"
-                    >
-                      Forgot password?
-                    </Link>
-                  </div>
-                )}
-              </CardContent>
+                </>
+              )}
               
-              <CardFooter className="flex flex-col space-y-4">
-                <Button 
-                  type="submit" 
-                  className="w-full"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
-                      {mode === 'login' ? 'Signing in...' : 'Creating account...'}
-                    </>
-                  ) : (
-                    <>
-                      {mode === 'login' ? (
-                        <>
-                          <LogInIcon className="mr-2 h-4 w-4" />
-                          Sign in
-                        </>
-                      ) : (
-                        <>
-                          <UserPlusIcon className="mr-2 h-4 w-4" />
-                          Create account
-                        </>
-                      )}
-                    </>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Enter your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  aria-invalid={!!errors.email}
+                />
+                {errors.email && (
+                  <p className="text-sm text-destructive">{errors.email}</p>
+                )}
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  aria-invalid={!!errors.password}
+                />
+                {errors.password && (
+                  <p className="text-sm text-destructive">{errors.password}</p>
+                )}
+              </div>
+              
+              {mode === 'register' && (
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <Input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="Confirm your password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    aria-invalid={!!errors.confirmPassword}
+                  />
+                  {errors.confirmPassword && (
+                    <p className="text-sm text-destructive">{errors.confirmPassword}</p>
                   )}
-                </Button>
-                
-                <p className="text-sm text-center text-muted-foreground">
-                  {mode === 'login' ? "Don't have an account?" : "Already have an account?"}
-                  <button
-                    type="button"
-                    className="ml-1 text-primary hover:underline focus:outline-none"
-                    onClick={toggleMode}
-                  >
-                    {mode === 'login' ? 'Sign up' : 'Sign in'}
-                  </button>
-                </p>
-              </CardFooter>
-            </form>
-          </Card>
-        </div>
+                </div>
+              )}
+            </CardContent>
+            
+            <CardFooter className="flex flex-col gap-4">
+              <Button 
+                type="submit" 
+                className="w-full"
+                disabled={formLoading}
+              >
+                {formLoading 
+                  ? 'Please wait...' 
+                  : mode === 'login' ? 'Sign In' : 'Submit Registration'}
+              </Button>
+              
+              <div className="flex items-center justify-center w-full text-sm">
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => handleModeChange(mode === 'login' ? 'register' : 'login')}
+                >
+                  {mode === 'login' 
+                    ? "Don't have an account? Register as a student" 
+                    : 'Already have an account? Sign in'}
+                </button>
+              </div>
+            </CardFooter>
+          </form>
+          
+          <div className="text-center mt-4">
+            <p className="text-sm text-muted-foreground">
+              {mode === 'login' 
+                ? (
+                  <>
+                    Are you a teacher? <a href="/teacher/login" className="text-primary hover:underline">Sign in here</a>
+                  </>
+                ) 
+                : (
+                  <>
+                    Already have an account? <a href="/auth?mode=login" className="text-primary hover:underline">Sign in</a>
+                  </>
+                )}
+            </p>
+          </div>
+        </Card>
       </div>
     </div>
   );

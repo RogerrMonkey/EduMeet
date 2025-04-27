@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -11,6 +10,9 @@ import {
   MessageSquareIcon,
   UserIcon,
   XIcon,
+  ShieldIcon,
+  BookIcon,
+  GraduationCapIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -22,15 +24,18 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu';
+import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 interface NavLinkProps {
   to: string;
   label: string;
   icon: React.ReactNode;
   isMobile?: boolean;
+  badge?: number;
 }
 
-const NavLink = ({ to, label, icon, isMobile = false }: NavLinkProps) => {
+const NavLink = ({ to, label, icon, isMobile = false, badge }: NavLinkProps) => {
   const location = useLocation();
   const isActive = location.pathname === to;
   
@@ -38,7 +43,7 @@ const NavLink = ({ to, label, icon, isMobile = false }: NavLinkProps) => {
     <Link
       to={to}
       className={cn(
-        "group flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300",
+        "group flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 relative",
         isActive 
           ? "bg-primary text-primary-foreground" 
           : "hover:bg-secondary",
@@ -52,14 +57,25 @@ const NavLink = ({ to, label, icon, isMobile = false }: NavLinkProps) => {
       )}>
         {label}
       </span>
+      
+      {badge !== undefined && badge > 0 && (
+        <span className={cn(
+          "absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center rounded-full text-xs font-medium",
+          isActive ? "bg-background text-foreground" : "bg-primary text-primary-foreground"
+        )}>
+          {badge > 9 ? '9+' : badge}
+        </span>
+      )}
     </Link>
   );
 };
 
 export default function Navbar() {
-  const { isAuthenticated, currentUser, userData, logout } = useAuth();
+  const { isAuthenticated, userData, currentUser, logout } = useAuth();
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const location = useLocation();
   
   // Handle scroll effect
   useEffect(() => {
@@ -74,10 +90,38 @@ export default function Navbar() {
   }, []);
   
   // Close mobile menu when navigating
-  const location = useLocation();
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [location]);
+  
+  // Get unread message count
+  useEffect(() => {
+    if (isAuthenticated && currentUser && userData) {
+      const conversationsRef = collection(db, 'conversations');
+      const q = query(
+        conversationsRef,
+        where('participants', 'array-contains', currentUser.uid)
+      );
+      
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        let total = 0;
+        
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          // Only count as unread if the conversation has unread messages
+          if (data.unreadCount && typeof data.unreadCount === 'number') {
+            total += data.unreadCount;
+          }
+        });
+        
+        setUnreadCount(total);
+      });
+      
+      return () => unsubscribe();
+    }
+    
+    return undefined;
+  }, [isAuthenticated, currentUser, userData]);
   
   // Handle logout
   const handleLogout = async () => {
@@ -97,6 +141,20 @@ export default function Navbar() {
       .join('')
       .toUpperCase()
       .substring(0, 2);
+  };
+  
+  // Get profile path based on user role
+  const getProfilePath = (role?: string) => {
+    switch (role) {
+      case 'admin':
+        return '/admin/profile';
+      case 'teacher':
+        return '/teacher/profile';
+      case 'student':
+        return '/student/profile';
+      default:
+        return '/profile';
+    }
   };
   
   return (
@@ -119,24 +177,34 @@ export default function Navbar() {
             </span>
           </Link>
           
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-2">
-            {isAuthenticated ? (
-              <>
-                <NavLink to="/" label="Home" icon={<HomeIcon className="w-4 h-4" />} />
-                <NavLink to="/appointments" label="Appointments" icon={<CalendarIcon className="w-4 h-4" />} />
-                <NavLink to="/messages" label="Messages" icon={<MessageSquareIcon className="w-4 h-4" />} />
-              </>
-            ) : (
-              <>
-                <NavLink to="/" label="Home" icon={<HomeIcon className="w-4 h-4" />} />
-                <NavLink to="/auth" label="Sign In" icon={<UserIcon className="w-4 h-4" />} />
-              </>
-            )}
-          </nav>
-          
-          {/* User Menu or Auth Buttons */}
+          {/* Right Side: Nav links and User Menu */}
           <div className="flex items-center gap-4">
+            {/* Desktop Navigation */}
+            <nav className="hidden md:flex items-center gap-2 mr-2">
+              {isAuthenticated ? (
+                <>
+                  <NavLink to="/" label="Home" icon={<HomeIcon className="w-4 h-4" />} />
+                  {userData?.role === 'admin' ? (
+                    <NavLink to="/admin" label="Admin" icon={<UserIcon className="w-4 h-4" />} />
+                  ) : (
+                    <>
+                      <NavLink to="/dashboard" label="Dashboard" icon={<UserIcon className="w-4 h-4" />} />
+                      <NavLink to="/appointments" label="Appointments" icon={<CalendarIcon className="w-4 h-4" />} />
+                      <NavLink 
+                        to="/messages" 
+                        label="Messages" 
+                        icon={<MessageSquareIcon className="w-4 h-4" />}
+                        badge={unreadCount}
+                      />
+                    </>
+                  )}
+                </>
+              ) : (
+                <NavLink to="/" label="Home" icon={<HomeIcon className="w-4 h-4" />} />
+              )}
+            </nav>
+            
+            {/* User Menu or Auth Buttons */}
             {isAuthenticated ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -155,8 +223,10 @@ export default function Navbar() {
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  {userData?.role !== 'admin' && (
+                    <>
                   <DropdownMenuItem asChild>
-                    <Link to="/profile" className="cursor-pointer">
+                    <Link to={getProfilePath(userData?.role)} className="cursor-pointer">
                       Profile
                     </Link>
                   </DropdownMenuItem>
@@ -165,6 +235,8 @@ export default function Navbar() {
                       Dashboard
                     </Link>
                   </DropdownMenuItem>
+                    </>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
                     <LogOutIcon className="mr-2 h-4 w-4" />
@@ -174,11 +246,41 @@ export default function Navbar() {
               </DropdownMenu>
             ) : (
               <div className="hidden md:flex items-center gap-2">
-                <Button asChild variant="ghost">
-                  <Link to="/auth?mode=login">Sign In</Link>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="default" size="sm" className="bg-blue-600 hover:bg-blue-700 mr-2">
+                      <div className="flex items-center gap-1">
+                        <GraduationCapIcon className="h-3.5 w-3.5" />
+                        Student
+                      </div>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem asChild>
+                      <Link to="/auth?mode=login" className="cursor-pointer">
+                        Login
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/auth?mode=register" className="cursor-pointer">
+                        Register
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                
+                <Button asChild variant="default" size="sm" className="bg-emerald-600 hover:bg-emerald-700 mr-2">
+                  <Link to="/teacher/login" className="flex items-center gap-1">
+                    <BookIcon className="h-3.5 w-3.5" />
+                    Teacher
+                  </Link>
                 </Button>
-                <Button asChild>
-                  <Link to="/auth?mode=register">Sign Up</Link>
+                
+                <Button asChild variant="default" size="sm" className="bg-amber-600 hover:bg-amber-700">
+                  <Link to="/admin/login" className="flex items-center gap-1">
+                    <ShieldIcon className="h-3.5 w-3.5" />
+                    Admin
+                  </Link>
                 </Button>
               </div>
             )}
@@ -207,9 +309,26 @@ export default function Navbar() {
             {isAuthenticated ? (
               <>
                 <NavLink to="/" label="Home" icon={<HomeIcon className="w-5 h-5" />} isMobile />
-                <NavLink to="/appointments" label="Appointments" icon={<CalendarIcon className="w-5 h-5" />} isMobile />
-                <NavLink to="/messages" label="Messages" icon={<MessageSquareIcon className="w-5 h-5" />} isMobile />
-                <NavLink to="/profile" label="Profile" icon={<UserIcon className="w-5 h-5" />} isMobile />
+                {userData?.role === 'admin' ? (
+                  <NavLink to="/admin" label="Admin" icon={<UserIcon className="w-5 h-5" />} isMobile />
+                ) : (
+                  <>
+                    <NavLink to="/dashboard" label="Dashboard" icon={<UserIcon className="w-5 h-5" />} isMobile />
+                    <NavLink to="/appointments" label="Appointments" icon={<CalendarIcon className="w-5 h-5" />} isMobile />
+                    <NavLink 
+                      to="/messages" 
+                      label="Messages" 
+                      icon={<MessageSquareIcon className="w-5 h-5" />}
+                      isMobile
+                    />
+                    <NavLink 
+                      to={getProfilePath(userData?.role)} 
+                      label="Profile" 
+                      icon={<UserIcon className="w-5 h-5" />} 
+                      isMobile 
+                    />
+                  </>
+                )}
                 <Button 
                   variant="destructive" 
                   className="w-full mt-4 flex items-center justify-center gap-2"
@@ -223,11 +342,28 @@ export default function Navbar() {
               <>
                 <NavLink to="/" label="Home" icon={<HomeIcon className="w-5 h-5" />} isMobile />
                 <div className="flex flex-col w-full gap-2 mt-4">
-                  <Button asChild variant="outline" size="lg" className="w-full">
-                    <Link to="/auth?mode=login">Sign In</Link>
+                  <div className="flex flex-col">
+                    <Button asChild variant="default" size="lg" className="w-full bg-blue-600 hover:bg-blue-700 mb-1">
+                      <div className="flex items-center justify-center gap-2">
+                        <GraduationCapIcon className="h-4 w-4" />
+                        Student Options
+                      </div>
+                    </Button>
+                    <div className="pl-4 flex flex-col gap-1 mt-1 mb-3">
+                      <Button asChild variant="outline" size="sm" className="w-full justify-start">
+                        <Link to="/auth?mode=login">Login</Link>
+                      </Button>
+                      <Button asChild variant="outline" size="sm" className="w-full justify-start">
+                        <Link to="/auth?mode=register">Register</Link>
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <Button asChild size="lg" className="w-full bg-emerald-600 hover:bg-emerald-700">
+                    <Link to="/teacher/login">Teacher Login</Link>
                   </Button>
-                  <Button asChild size="lg" className="w-full">
-                    <Link to="/auth?mode=register">Sign Up</Link>
+                  <Button asChild size="lg" className="w-full bg-amber-600 hover:bg-amber-700">
+                    <Link to="/admin/login">Admin Login</Link>
                   </Button>
                 </div>
               </>

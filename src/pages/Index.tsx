@@ -1,23 +1,29 @@
-
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import Navbar from '@/components/Navbar';
 import Hero from '@/components/Hero';
 import { logEvent } from '@/lib/firebase';
 
 export default function Index() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, userData } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   useEffect(() => {
+    // Log page view for analytics
     logEvent('Home page viewed');
     
-    // If user is authenticated, redirect to dashboard
-    if (isAuthenticated && !isLoading) {
-      navigate('/dashboard');
+    // Only redirect if explicitly navigated via a dashboard link (not direct home access)
+    // or if redirected from another page (not direct navigation)
+    const isFromDashboardLink = new URLSearchParams(location.search).get('from') === 'dashboard';
+    const isDirectNavigation = location.key === 'default';
+    
+    if (isAuthenticated && !isLoading && userData && (isFromDashboardLink || (!isDirectNavigation && location.state?.redirect))) {
+      const route = userData.role === 'admin' ? '/admin' : '/dashboard';
+      navigate(route);
     }
-  }, [isAuthenticated, isLoading, navigate]);
+  }, [isAuthenticated, isLoading, navigate, userData, location]);
   
   if (isLoading) {
     return (
@@ -27,18 +33,19 @@ export default function Index() {
     );
   }
   
+  const currentYear = new Date().getFullYear();
+  
   return (
     <div className="min-h-screen">
       <Navbar />
       <Hero />
       
-      {/* Footer */}
       <footer className="py-10 border-t">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="font-semibold">EduMeet</span>
-              <span className="text-muted-foreground">© {new Date().getFullYear()}</span>
+              <span className="text-muted-foreground">© {currentYear}</span>
             </div>
             
             <div className="flex gap-6">
