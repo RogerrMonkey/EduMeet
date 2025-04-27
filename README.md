@@ -135,5 +135,5 @@ This project is licensed under the [MIT License](LICENSE).
 ## Contact 📬
 
 Have questions, suggestions, or just want to say hi?  
-Reach out to me at **[your-email@example.com]**.
+Reach out to me at **[Harshpatil.prf@gmail.com]**.
 
